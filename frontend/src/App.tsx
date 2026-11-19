@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, streamRun } from "./api/client";
+import { api, AuthError, setAccessKey, streamRun } from "./api/client";
 import FollowUpChatPanel from "./components/FollowUpChatPanel";
 import LiveAgentGraphFeed from "./components/LiveAgentGraphFeed";
 import MemoryExplorerDrawer, { RunMemoryPanel } from "./components/MemoryExplorerDrawer";
@@ -20,9 +20,15 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [pendingPlan, setPendingPlan] = useState<ResearchPlan | null>(null);
   const [drawer, setDrawer] = useState(false);
+  const [needsKey, setNeedsKey] = useState(false);
+  const [keyInput, setKeyInput] = useState("");
   const dispose = useRef<(() => void) | null>(null);
 
-  useEffect(() => { api.providers().then(setProviders).catch((e: Error) => setError(`Backend unreachable: ${e.message}`)); }, []);
+  const loadProviders = useCallback(() => {
+    api.providers().then((p) => { setProviders(p); setNeedsKey(false); })
+      .catch((e: Error) => (e instanceof AuthError ? setNeedsKey(true) : setError(`Backend unreachable: ${e.message}`)));
+  }, []);
+  useEffect(() => { loadProviders(); }, [loadProviders]);
   useEffect(() => () => dispose.current?.(), []);
 
   const subscribe = useCallback((id: string) => {
@@ -75,6 +81,18 @@ export default function App() {
 
   return (
     <div className="mx-auto max-w-[96rem] space-y-4 p-4">
+      {needsKey && (
+        <form className="flex gap-2 rounded-xl bg-white p-4 ring-1 ring-slate-300" onSubmit={(e) => { e.preventDefault(); setAccessKey(keyInput.trim()); loadProviders(); }}>
+          <input type="password" value={keyInput} onChange={(e) => setKeyInput(e.target.value)} placeholder="Access key"
+            className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" aria-label="Access key" />
+          <button className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">Unlock</button>
+        </form>
+      )}
+      {providers && !providers.llm_configured && (
+        <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800 ring-1 ring-amber-200" role="status">
+          No LLM API key is configured on the server. Set <code>GEMINI_API_KEY</code> (or <code>OPENAI_API_KEY</code>) and restart to enable online research.
+        </div>
+      )}
       <ResearchPromptBar providers={providers} running={running} onStart={start} />
       {error && (
         <div className="flex items-start justify-between rounded-lg bg-red-50 p-3 text-sm text-red-700 ring-1 ring-red-200" role="alert">

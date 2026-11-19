@@ -2,8 +2,20 @@ import type {
   AgentEvent, Depth, MemoryItem, MemoryStats, ProviderStatus, ResearchPlan, ResearchResult,
 } from "../types";
 
+const KEY_STORAGE = "deepbrief_access_key";
+export const getAccessKey = () => localStorage.getItem(KEY_STORAGE) ?? "";
+export const setAccessKey = (k: string) => localStorage.setItem(KEY_STORAGE, k);
+/** Append ?key= for requests the browser makes without custom headers (SSE, downloads). */
+const withKey = (url: string) => {
+  const k = getAccessKey();
+  return k ? `${url}${url.includes("?") ? "&" : "?"}key=${encodeURIComponent(k)}` : url;
+};
+
+export class AuthError extends Error {}
+
 async function http<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, { headers: { "Content-Type": "application/json" }, ...init });
+  const res = await fetch(url, { headers: { "Content-Type": "application/json", "X-Access-Key": getAccessKey() }, ...init });
+  if (res.status === 401) throw new AuthError("Access key required");
   if (!res.ok) {
     let detail = res.statusText;
     try { detail = (await res.json()).detail ?? detail; } catch { /* non-JSON error */ }
@@ -26,7 +38,7 @@ export const api = {
     http<{ question: string; answer: string }>(`/api/research/${id}/followup`, {
       method: "POST", body: JSON.stringify({ question }),
     }),
-  downloadUrl: (id: string, fmt: "md" | "html" | "pdf") => `/api/reports/${id}/download/${fmt}`,
+  downloadUrl: (id: string, fmt: "md" | "html" | "pdf") => withKey(`/api/reports/${id}/download/${fmt}`),
   memorySearch: (q: string) => http<MemoryItem[]>(`/api/memory/search?q=${encodeURIComponent(q)}&k=10`),
   memoryItems: () => http<MemoryItem[]>("/api/memory/items?limit=100"),
   memoryStats: () => http<MemoryStats>("/api/memory/stats"),
@@ -37,7 +49,7 @@ export const api = {
 export function streamRun(
   id: string, onEvent: (e: AgentEvent) => void, onEnd: () => void, onFail: (msg: string) => void,
 ): () => void {
-  const es = new EventSource(`/api/research/${id}/stream`);
+  const es = new EventSource(withKey(`/api/research/${id}/stream`));
   es.onmessage = (m) => {
     try { onEvent(JSON.parse(m.data) as AgentEvent); } catch { /* ignore malformed frame */ }
   };

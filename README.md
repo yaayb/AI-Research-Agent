@@ -80,3 +80,13 @@ Suites: `test_search_and_scrape`, `test_memory_persistence`, `test_agent_graph`,
 - Data lives in `backend/data/` (Chroma, checkpoints, SQLite metadata, reports).
 - The first non-offline memory use downloads Chroma's default ONNX embedding model (~80 MB).
 - Page extraction can't read JS-rendered sites or PDFs; those degrade to search snippets.
+
+## Deploying (Docker)
+```bash
+cp .env.example .env     # set GEMINI_API_KEY (or OPENAI_API_KEY), ACCESS_KEY, optional TAVILY_API_KEY; keep OFFLINE_TEST_MODE=false
+docker compose up -d --build   # app + UI on http://localhost:8000, data in the deepbrief-data volume
+```
+- Put it behind HTTPS (Caddy/nginx/Cloudflare, disable proxy buffering for `/api/research/*/stream`).
+- Set `ACCESS_KEY` on any public instance; `MAX_CONCURRENT_RUNS` caps spend (HTTP 429 when busy).
+- Run one worker (live-run buffers are in-process); finished sessions stay readable from the checkpoint DB.
+- Online mode needs an LLM key; search works keyless via ddgs (Tavily recommended for reliability at scale).

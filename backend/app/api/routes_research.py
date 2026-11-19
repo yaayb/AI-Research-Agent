@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import uuid
 from typing import Any
 
@@ -28,6 +29,7 @@ class RunChannel:
         self.events: list[dict[str, Any]] = []
         self.cond = asyncio.Condition()
         self.finished = False
+        self.finished_at = 0.0
 
     async def push(self, ev: dict[str, Any]) -> None:
         async with self.cond:
@@ -37,6 +39,7 @@ class RunChannel:
     async def finish(self) -> None:
         async with self.cond:
             self.finished = True
+            self.finished_at = time.time()
             self.cond.notify_all()
 
 
@@ -56,6 +59,12 @@ async def start_research(body: StartResearchRequest, request: Request) -> dict[s
     ctx = request.app.state.ctx
     if not ctx.settings.llm_configured:
         raise HTTPException(400, f"LLM provider '{ctx.settings.llm_provider}' has no API key. Set it in .env or enable OFFLINE_TEST_MODE.")
+    active = sum(1 for c in ctx.channels.values() if not c.finished)
+    if active >= ctx.settings.max_concurrent_runs:
+        raise HTTPException(429, f"Server is busy ({active} runs in progress). Please retry in a minute.")
+    now = time.time()
+    for k in [k for k, c in ctx.channels.items() if c.finished and now - c.finished_at > ctx.settings.channel_ttl_s]:
+        ctx.channels.pop(k, None)  # evict old buffers; results stay readable from the checkpoint
     sid = uuid.uuid4().hex[:12]
     await create_session_row(sid, body.topic, body.depth)
     channel = RunChannel()

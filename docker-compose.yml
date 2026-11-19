@@ -1,0 +1,10 @@
+services:
+  deepbrief:
+    build: .
+    ports: ["8000:8000"]
+    env_file: .env
+    volumes:
+      - deepbrief-data:/srv/backend/data
+    restart: unless-stopped
+volumes:
+  deepbrief-data:

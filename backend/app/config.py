@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     http_timeout_s: float = 12.0
     max_page_chars: int = 12000
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    # production controls
+    max_concurrent_runs: int = Field(default=3, ge=1, le=50)
+    channel_ttl_s: int = 3600          # finished live-run buffers are evicted after this
+    access_key: str = ""               # if set, /api/* requires header X-Access-Key (or ?key= for SSE/downloads)
+    frontend_dist: str = "../frontend/dist"
 
     # ---- derived helpers -------------------------------------------------
     @staticmethod

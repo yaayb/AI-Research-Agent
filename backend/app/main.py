@@ -5,13 +5,16 @@ graph, Chroma store) are created once in the lifespan and shared through ``app.s
 """
 from __future__ import annotations
 
+import hmac
 import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.agent.graph import build_graph
 from app.api import routes_memory, routes_reports, routes_research
@@ -59,9 +62,29 @@ def create_app() -> FastAPI:
     app.include_router(routes_reports.router)
     app.include_router(routes_memory.router)
 
+    if s.access_key:
+        @app.middleware("http")
+        async def require_access_key(request: Request, call_next):
+            p = request.url.path
+            if p.startswith("/api/") and p != "/api/health" and request.method != "OPTIONS":
+                supplied = request.headers.get("x-access-key") or request.query_params.get("key")
+                if not supplied or not hmac.compare_digest(supplied, s.access_key):
+                    return JSONResponse({"detail": "Invalid or missing access key"}, status_code=401)
+            return await call_next(request)
+
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
-        return {"status": "ok", "llm": s.active_llm_model, "search": s.search_provider}
+        return {"status": "ok", "llm": s.active_llm_model, "search": s.search_provider,
+                "llm_configured": s.llm_configured, "auth_required": bool(s.access_key)}
+
+    dist = Settings.resolve(s.frontend_dist)
+    if (dist / "index.html").is_file():  # single-container deployment: API + built React app
+        app.mount("/assets", StaticFiles(directory=dist / "assets"), name="assets")
+
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def spa(full_path: str) -> FileResponse:
+            f = (dist / full_path).resolve()
+            return FileResponse(f if f.is_file() and dist in f.parents else dist / "index.html")
 
     return app
 

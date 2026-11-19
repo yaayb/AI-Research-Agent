@@ -70,14 +70,29 @@ async def _tavily(query: str, n: int, topic: str, key: str) -> list[dict[str, An
 
 
 def _ddgs_sync(query: str, n: int, topic: str) -> list[dict[str, Any]]:
+    """ddgs engines rate-limit independently and flakily -> rotate backends until one returns results."""
+    import time
+
     from ddgs import DDGS
 
-    client = DDGS()
-    if topic == "news":
-        raw = client.news(query, max_results=n + 3)
-        return [{"title": r.get("title"), "url": r.get("url"), "snippet": r.get("body"), "published_date": r.get("date")} for r in raw]
-    raw = client.text(query, max_results=n + 3)
-    return [{"title": r.get("title"), "url": r.get("href"), "snippet": r.get("body")} for r in raw]
+    last: Exception | None = None
+    for attempt, backend in enumerate(("auto", "google", "bing", "yahoo", "auto")):
+        try:
+            client = DDGS(timeout=10)
+            if topic == "news":
+                raw = client.news(query, max_results=n + 3, backend=backend if backend != "google" else "auto")
+                rows = [{"title": r.get("title"), "url": r.get("url"), "snippet": r.get("body"), "published_date": r.get("date")} for r in raw]
+            else:
+                raw = client.text(query, max_results=n + 3, backend=backend)
+                rows = [{"title": r.get("title"), "url": r.get("href"), "snippet": r.get("body")} for r in raw]
+            if rows:
+                return rows
+        except Exception as exc:  # noqa: BLE001 - "No results found" / rate limits are expected
+            last = exc
+        time.sleep(0.6 * (attempt + 1))
+    if last:
+        raise last
+    return []
 
 
 async def run_search(query: str, max_results: int = 5, topic_filter: str = "general") -> tuple[list[dict[str, Any]], str]:
